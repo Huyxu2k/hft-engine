@@ -1,0 +1,138 @@
+use crate::types::{Execution, Order, Side};
+use hashbrown::HashMap;
+use std::cmp::Reverse;
+use std::{collections::BTreeMap, u64};
+
+pub struct OrderBook {
+    // asks: Bán thấp -> cao (key: u64)
+    asks: BTreeMap<u64, u32>,
+    // bids: Mua cao -> thấp (key: Reverse<u64> để BTreeMap tự sắp xếp giảm dần)
+    bids: BTreeMap<Reverse<u64>, u32>,
+
+    // Lưu trữ chi tiết lệnh
+    orders: HashMap<u64, Order>,
+
+    // ID cho các giao dịch
+    trade_counter: u64,
+}
+
+impl OrderBook {
+    pub fn new() -> Self {
+        Self {
+            asks: BTreeMap::new(),
+            bids: BTreeMap::new(),
+            orders: HashMap::new(),
+            trade_counter: 0,
+        }
+    }
+
+    pub fn process_order(&mut self, incoming_order: Order) -> Vec<Execution> {
+        let mut executions: Vec<Execution> = Vec::new();
+        let mut remaining_qty = incoming_order.qty;
+        
+        // Cố gắng khớp lệnh trước khi thêm phần còn lại vào sổ lệnh
+        if incoming_order.side == Side::Buy {
+            // Check nếu có lệnh bán (asks) có giá <= giá mua của lệnh mới
+            while remaining_qty > 0 && !self.asks.is_empty() {
+                let (&best_ask_price, &best_ask_qty) = {
+                    let first_entry = self.asks.iter().next().unwrap();
+                    (first_entry.0, first_entry.1)
+                };
+                
+                if best_ask_price > incoming_order.price { break; } // Không khớp được nữa
+
+                // Logic khớp lệnh: lấy min(số lượng còn lại, số lượng tốt nhất)
+                let matched_qty = std::cmp::min(remaining_qty, best_ask_qty);
+                remaining_qty -= matched_qty;
+
+                // Cập nhật sổ lệnh Ask và chi tiết lệnh Maker
+                self.update_level(&mut self.asks, best_ask_price, best_ask_qty - matched_qty);
+                self.update_maker_order(best_ask_price, Side::Sell, matched_qty);
+
+                // Ghi nhận giao dịch
+                executions.push(Execution {
+                    trade_id: self.trade_counter,
+                    maker_order_id: self.get_order_id_at_price(best_ask_price, Side::Sell), // Cần hàm phụ trợ
+                    taker_order_id: incoming_order.id,
+                    price: best_ask_price,
+                    qty: matched_qty,
+                });
+                self.trade_counter += 1;
+            }
+        } else {
+            // Tương tự cho lệnh Sell, khớp với Bids có giá >= giá bán của lệnh mới
+            while remaining_qty > 0 && !self.bids.is_empty() {
+                let (&Reverse(best_bid_price), &best_bid_qty) = self.bids.iter().next().unwrap();
+
+                if best_bid_price < incoming_order.price { break; } // Không khớp được nữa
+
+                let matched_qty = std::cmp::min(remaining_qty, best_bid_qty);
+                remaining_qty -= matched_qty;
+
+                self.update_level(&mut self.bids, Reverse(best_bid_price), best_bid_qty - matched_qty);
+                self.update_maker_order(best_bid_price, Side::Buy, matched_qty);
+                
+                // Ghi nhận giao dịch (cần hàm phụ trợ để lấy ID)
+                 executions.push(Execution {
+                    trade_id: self.trade_counter,
+                    maker_order_id: self.get_order_id_at_price(best_bid_price, Side::Buy),
+                    taker_order_id: incoming_order.id,
+                    price: best_bid_price,
+                    qty: matched_qty,
+                });
+                self.trade_counter += 1;
+            }
+        }
+
+        // Nếu còn lại số lượng, thêm phần còn lại vào sổ lệnh (trở thành Maker Order)
+        if remaining_qty > 0 {
+            let final_order = Order {
+                qty: remaining_qty,
+                ..incoming_order.clone()
+            };
+            self.insert_remaining(final_order);
+        }
+
+        executions
+    }
+
+    // Hàm phụ trợ để lấy ID lệnh tại mức giá (cần cấu trúc sổ lệnh phức tạp hơn 1 chút nếu muốn lấy chính xác ID của lệnh đầu tiên, ở đây ta giả định đơn giản)
+    fn get_order_id_at_price(&self, price: u64, side: Side) -> u64 {
+        // Trong hệ thống thực tế, mỗi mức giá sẽ là một VecDeque<Order> (hàng đợi FIFO)
+        // Để đơn giản, ta chỉ trả về ID của lệnh đầu tiên tìm thấy trong HashMap có giá tương ứng.
+        // Đây là điểm yếu trong ví dụ đơn giản này.
+        self.orders.iter()
+           .find(|&(_, order)| order.price == price && order.side == side)
+           .map(|(&id, _)| id)
+           .unwrap_or(0)
+    }
+    fn update_level<K: Ord>(&mut self, book: &mut BTreeMap<K, u32>, key: K, new_qty: u32) {
+        if new_qty == 0 {
+            book.remove(&key);
+        } else {
+            *book.get_mut(&key).unwrap() = new_qty;
+        }
+    }
+
+    fn update_maker_order(&mut self, price: u64, side: Side, matched_qty: u32) {
+        // Cần vòng lặp để tìm lệnh maker chính xác đã khớp.
+        // Trong hệ thống HFT thực tế:
+        // bids/asks lưu trữ VecDeque<Order> chứ không chỉ tổng volume.
+        // Khi khớp, ta pop_front() các lệnh cũ ra khỏi VecDeque.
+        // Ví dụ đơn giản này chỉ cập nhật tổng volume.
+    }
+
+    fn insert_remaining(&mut self, order: Order) {
+        let price = order.price;
+        let qty = order.qty;
+        match order.side {
+            Side::Buy => {
+                *self.bids.entry(Reverse(price)).or_insert(0) += qty;
+            }
+            Side::Sell => {
+                *self.asks.entry(price).or_insert(0) += qty;
+            }
+        }
+        self.orders.insert(order.id, order);
+    }
+}
