@@ -30,6 +30,27 @@ pub struct Execution {
 }
 
 
+pub struct OrderBook {
+    pub symbol: String,
+    pub asks: Vec<(f64, f64)>,
+    pub bids: Vec<(f64, f64)>,
+    // Lưu trữ chi tiết lệnh
+    pub orders: HashMap<u64, Order>,
+    // ID cho các giao dịch
+    pub trade_counter: u64,
+    pub timestamp: u64,
+}
+
+pub struct OrderBook {
+    pub symbol: String,
+    pub asks: BTreeMap<u64, u32>,
+    pub bids: BTreeMap<Reverse<u64>, u32>,
+    // Lưu trữ chi tiết lệnh
+    pub orders: HashMap<u64, Order>,
+    // ID cho các giao dịch
+    pub trade_counter: u64,
+    pub timestamp: u64,
+}
 
 pub struct OrderBook {
     // asks: Bán thấp -> cao (key: u64)
