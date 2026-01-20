@@ -1,0 +1,2 @@
+- Market Data Ingestion 
+    - Binance API (ws) 

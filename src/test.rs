@@ -185,3 +185,104 @@ impl OrderBook {
         self.orders.insert(order.id, order);
     }
 }
+
+
+// Cấu trúc dữ liệu tối ưu: Sử dụng &str để tránh copy dữ liệu (Zero-copy)
+#[derive(Deserialize, Debug)]
+pub struct BinanceTicker<'a> {
+    #[serde(rename = "s")]
+    pub symbol: &'a str,
+    #[serde(rename = "a")]
+    pub best_ask: &'a str,
+    #[serde(rename = "A")]
+    pub ask_qty: &'a str,
+    #[serde(rename = "b")]
+    pub best_bid: &'a str,
+    #[serde(rename = "B")]
+    pub bid_qty: &'a str,
+}
+
+pub struct MarketDataHandler {
+    symbol: String,
+    tx: mpsc::Sender<String>, // Gửi dữ liệu thô sang Strategy Engine
+}
+
+impl MarketDataHandler {
+    pub fn new(symbol: &str, tx: mpsc::Sender<String>) -> Self {
+        Self {
+            symbol: symbol.to_lowercase(),
+            tx,
+        }
+    }
+
+    pub async fn start_loop(&self) {
+        // Binance Stream URL cho Aggregate Trade hoặc Book Ticker
+        let url = format!("wss://stream.binance.com:9443/ws/{}@bookTicker", self.symbol);
+        let url = Url::parse(&url).unwrap();
+
+        loop {
+            println!("Connecting to Binance WebSocket: {}", url);
+            
+            match connect_async(&url).await {
+                Ok((ws_stream, _)) => {
+                    let (_, mut read) = ws_stream.split();
+                    
+                    while let Some(message) = read.next().await {
+                        match message {
+                            Ok(Message::Text(text)) => {
+                                // Gửi thẳng dữ liệu thô sang Engine để xử lý ở thread khác
+                                // Tránh block việc nhận data từ socket
+                                if let Err(e) = self.tx.send(text).await {
+                                    eprintln!("Channel error: {}", e);
+                                    break;
+                                }
+                            }
+                            Ok(Message::Ping(_)) => continue,
+                            Err(e) => {
+                                eprintln!("WebSocket error: {}", e);
+                                break;
+                            }
+                            _ => (),
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Connection failed: {}. Retrying in 5s...", e);
+                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                }
+            }
+        }
+    }
+}
+
+
+#[tokio::main]
+async fn main() {
+    // Khởi tạo channel với buffer size để tránh treo hệ thống (Backpressure)
+    let (tx, mut rx) = mpsc::channel::<String>(1000);
+
+    // Khởi chạy Market Data Ingestion trong một task riêng
+    let handler = MarketDataHandler::new("btcusdt", tx);
+    tokio::spawn(async move {
+        handler.start_loop().await;
+    });
+
+    // Logic xử lý dữ liệu (Strategy Engine)
+    println!("Strategy Engine started...");
+    while let Some(raw_data) = rx.recv().await {
+        // Parse dữ liệu cực nhanh với Zero-copy
+        let parse_result: Result<BinanceTicker, _> = serde_json::from_str(&raw_data);
+        
+        match parse_result {
+            Ok(ticker) => {
+                // Đây là nơi logic HFT của bạn bắt đầu
+                // Ví dụ: So sánh giá Binance vs Bybit
+                println!(
+                    "Symbol: {} | Bid: {} | Ask: {}", 
+                    ticker.symbol, ticker.best_bid, ticker.best_ask
+                );
+            }
+            Err(e) => eprintln!("Parse error: {}", e),
+        }
+    }
+}
