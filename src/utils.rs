@@ -1,6 +1,8 @@
 use std::{cmp::Reverse, collections::BTreeMap};
 use hashbrown::HashMap;
 
+use crate::types::U64;
+
 
 // API Configuration
 #[derive(Debug, Clone)]
@@ -14,23 +16,23 @@ pub struct ExchangeConfig {
 #[derive(Debug, Clone)]
 pub struct Price {
     pub symbol: String,
-    pub price: u64,
-    pub timestamp: u64,
-    pub volume: u64
+    pub price: U64,
+    pub timestamp: U64,
+    pub volume: U64
 }
 
 #[derive(Debug)]
 pub struct OrderBook {
     pub symbol: String,
     // Giá bán
-    pub asks: BTreeMap<u64, u32>,
+    pub asks: BTreeMap<U64, u32>,
     // Giá mua
-    pub bids: BTreeMap<Reverse<u64>, u32>,
+    pub bids: BTreeMap<Reverse<U64>, u32>,
     // Lưu trữ chi tiết lệnh
-    pub orders: HashMap<u64, Order>,
+    pub orders: HashMap<U64, Order>,
     // ID cho các giao dịch
-    pub trade_counter: u64,
-    pub timestamp: u64,
+    pub trade_counter: U64,
+    pub timestamp: U64,
 }
 
 #[derive(Debug)]
@@ -49,39 +51,39 @@ pub enum OrderType {
 
 #[derive(Debug)]
 pub struct Order {
-    pub id: u64,
+    pub id: U64,
     pub symbol: String,
-    pub price: u64,
-    pub qty: u64,
+    pub price: U64,
+    pub qty: U64,
     pub order_side: OrderSide,
     pub order_type: OrderType,
-    pub timestamp: u64
+    pub timestamp: U64
 }
 
 #[derive(Debug)]
 pub struct Position {
     pub symbol: String,
-    pub qty: u64,
+    pub qty: U64,
     // giá trung bình
-    pub avr_price: u64,
+    pub avr_price: U64,
     // lợi nhuận / thua lỗ chưa thực hiện
-    pub unrealized_pnl: u64
+    pub unrealized_pnl: U64
 }
 
 #[derive(Debug)]
 pub struct TradingSignal {
     pub symbol: String,
     pub action: OrderSide,
-    pub confidence: u64,
-    pub target_price: u64,
-    pub qty: u64
+    pub confidence: U64,
+    pub target_price: U64,
+    pub qty: U64
 }
 
 #[derive(Debug)]
 pub struct RiskParams {
-    pub max_position_size: u64,
-    pub max_loss_per_trade: u64,
-    pub max_daily_loss: u64,
-    pub stop_loss_pct: u64,
-    pub take_profit_pct: u64
+    pub max_position_size: U64,
+    pub max_loss_per_trade: U64,
+    pub max_daily_loss: U64,
+    pub stop_loss_pct: U64,
+    pub take_profit_pct: U64
 }
