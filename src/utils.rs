@@ -17,7 +17,7 @@ pub struct ExchangeConfig {
 pub struct Price {
     pub symbol: String,
     pub price: U64,
-    pub timestamp: U64,
+    pub timestamp: u64,
     pub volume: U64
 }
 
@@ -31,8 +31,8 @@ pub struct OrderBook {
     // Lưu trữ chi tiết lệnh
     pub orders: HashMap<U64, Order>,
     // ID cho các giao dịch
-    pub trade_counter: U64,
-    pub timestamp: U64,
+    pub trade_counter: u64,
+    pub timestamp: u64,
 }
 
 #[derive(Debug)]
@@ -51,13 +51,13 @@ pub enum OrderType {
 
 #[derive(Debug)]
 pub struct Order {
-    pub id: U64,
+    pub id: u64,
     pub symbol: String,
     pub price: U64,
     pub qty: U64,
     pub order_side: OrderSide,
     pub order_type: OrderType,
-    pub timestamp: U64
+    pub timestamp: u64
 }
 
 #[derive(Debug)]

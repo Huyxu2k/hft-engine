@@ -7,30 +7,31 @@ use reqwest::Client;
 use serde::Deserialize;
 use sha2::Sha256;
 
-use crate::utils::{ExchangeConfig, Price};
+use crate::types::U64;
+use crate::utils::{ExchangeConfig, OrderBook, Price};
 
 // Binance API response structures
 
 type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct BinancePrice<'a> {
-    pub symbol: &'a str,
-    pub price: &'a str
+pub struct BinancePrice {
+    pub symbol: String,
+    pub price: String
 }
 
-#[derive(Debug)]
-pub struct BinanceTicker<'a> {
-    pub symbol: &'a str,
-    pub price: &'a str,
-    pub volume: &'a str
+#[derive(Debug, Deserialize)]
+pub struct BinanceTicker {
+    pub symbol: String,
+    pub price: String,
+    pub volume: String
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct BinanceOrderBook {
     pub last_update_id: u64,
-    pub asks: BTreeMap<u64, u32>,
-    pub bids: BTreeMap<Reverse<u64>, u32>
+    pub asks: Vec<[String; 2]>,
+    pub bids: Vec<[String; 2]>,
 }
 
 pub struct BinanceAPI {
@@ -88,9 +89,61 @@ impl BinanceAPI {
 
         Ok(Price {
             symbol: binance_price.symbol.to_string(),
-            price: price as u64,
+            price: U64::from_f64(price),
             timestamp: self.get_timestamp() / 1000,
-            volume: volume as u64,
+            volume: U64::from_f64(volume),
         })
+    }
+    
+    async fn get_24hr_volume(&self, symbol: &str) -> Result<f64, String> {
+        let url = format!("{}/api/v3/ticker/24hr", self.config.base_url);
+
+        let res = self.client
+                .get(&url)
+                .query(&[("symbol", symbol)])
+                .send()
+                .await
+                .map_err(|e| format!("Request failed: {}", e))?;
+
+        let ticker = res.json::<BinanceTicker>()
+                            .await
+                            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        
+        let volume = ticker
+            .volume
+            .parse::<f64>()
+            .map_err(|e| format!("Failed to parse volume: {}", e))?;
+
+        Ok(volume)
+    }
+
+    pub async fn get_orderbook(&self, symbol: &str) -> Result<OrderBook, String> {
+        let url = format!("{}/api/v3/depth", self.config.base_url);
+
+        let res = self.client
+                    .get(&url)
+                    .query(&[("symbol", symbol), ("limit", "10")])
+                    .send()
+                    .await
+                    .map_err(|e| format!("Request failed: {}", e))?;
+
+        let binance_orderbook = res.json::<BinanceOrderBook>()
+                        .await
+                        .map_err(|e| format!("Failed to parse response: {}", e))?;
+        
+        let mut asks = Vec::<(f64, f64)>::new();
+
+        for ask in binance_orderbook.asks {
+            let price = ask[0]
+                .parse::<f64>()
+                .map_err(|e| format!("Failed to parse ask price: {}", e))?;
+            let quantity = ask[1]
+                .parse::<f64>()
+                .map_err(|e| format!("Failed to parse ask quantity: {}", e))?;
+            asks.push((price, quantity));
+        }
+
+        // TODO: convert asks/bids into OrderBook and return
+        Err("get_orderbook not implemented".to_string())
     }
 }
