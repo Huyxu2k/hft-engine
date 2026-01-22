@@ -1,5 +1,24 @@
+use std::cmp::Reverse;
+use std::collections::BTreeMap;
 use std::ops::{Add, Sub, Mul, Div};
 use std::fmt;
+
+use hashbrown::HashMap;
+
+
+pub struct OrderBook {
+    pub symbol: String,
+    pub asks: BTreeMap<U64, U64>, // price, qty
+    pub bids: BTreeMap<Reverse<U64>, U64>,
+    // Lưu trữ chi tiết lệnh
+    //pub orders: HashMap<u64, Order>,
+}
+
+pub enum Side {
+    Buy,
+    Sell,
+    Hold,
+}
 
 pub const SCALE_FACTOR: u64 = 100_000_000;
 const SCALE_FACTOR_F64: f64 = 100_000_000.0;
