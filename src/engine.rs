@@ -1,17 +1,42 @@
 use crossbeam_channel::bounded;
-use crate::{market, strategy, trader, risk};
+use crate::{core::OrderBook, types::OrderCommand};
 
-pub async fn run() {
-    let (tx, rx) = bounded(256);
-    tokio::spawn(market::start(tx));
+// 
+use crossbeam_channel::{unbounded, Sender, Receiver};
+use std::thread;
 
-    let mut position = 0i64;
+pub fn start_core_engine() -> Sender<OrderCommand> {
+    let (tx, rx): (Sender<OrderCommand>, Receiver<OrderCommand>) = unbounded();
 
-    while let Ok(book) = rx.recv(){
-        let side = strategy::decide(&book);
+    thread::spawn(move || {
+        let mut book = OrderBook::new();
 
-        if risk::allow(&side, position) {
-            trader::execute(side).await;
+        // Vòng lặp vô tận xử lý tin nhắn với độ trễ thấp nhất
+        while let Ok(cmd) = rx.recv() {
+            match cmd {
+                OrderCommand::Add { id, price, mut shares, is_buy , resp} => {
+                    // 1. Chạy Matching Engine trước
+                    let trades = book.execute_match(id, price, shares, is_buy);
+
+                    // Tính khối lượng đã khớp để trừ đi
+                    let matched_shares: u32 = trades.iter().map(|t| t.shares).sum();
+                    shares -= matched_shares;
+
+                    // 2. Nếu còn dư thì mới thêm vào Book (Passive Order)
+                    if shares > 0 {
+                        book.add_order(id, price, shares, is_buy);
+                    }
+
+                    // 3. Gửi thông báo giao dịch về luồng gửi
+                    let _ = resp.send(trades);
+                }
+                OrderCommand::Cancel { id } => {
+                    book.cancel_order(id);
+                }
+            }
+            // Sau mỗi lệnh có thể thực hiện Match Engine tại đây
         }
-    }
+    });
+    // Trả về Sender để các luồng khác gửi lệnh vào
+    tx
 }

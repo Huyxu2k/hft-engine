@@ -1,3 +1,4 @@
+```
 src/
 ├── main.rs          # entrypoint
 ├── config.rs        # load config
@@ -7,3 +8,4 @@ src/
 ├── trader.rs        # đặt / hủy lệnh
 ├── engine.rs        # nối market → strategy → trader
 └── types.rs         # struct + enum dùng chung
+```

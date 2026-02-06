@@ -1,10 +1,12 @@
 // https://gist.github.com/halfelf/db1ae032dc34278968f8bf31ee999a25
+use crate::types::OrderID;
+use crate::types::Price;
+use crate::types::Trade;
+use crate::types::U64;
 
-type OrderId = u64;
-type Price = i32;
 pub struct Order {
-    id: OrderId,
-    shares: u32,
+    id: OrderID,
+    shares: U64,
     price: Price,
     // Index thay cho con trỏ để quản lý bộ nhớ nhanh hơn
     prev: Option<usize>,
@@ -14,7 +16,7 @@ pub struct Order {
 
 pub struct Limit {
     price: Price,
-    total_volume: u64,
+    total_volume: U64,
     head: Option<usize>, // Index của Order đầu tiên
     tail: Option<usize>  // Index của Order cuối cùng
 }
@@ -23,13 +25,17 @@ pub struct Limit {
 
 use std::collections::{BTreeMap, HashMap};
 
+// Trait
+pub trait  IOrderBook {
+    fn execute_match(&self);
+}
+
 pub struct OrderBook {
-    
     // TODO Option<Order> Sử dụng Option để đánh dấu ô trống
     orders_arena: Vec<Order>,               // Arena lưu trữ tất cả các lệnh để tránh cấp phát nhỏ lẻ
     // TODO Lưu trữ các index có thể tái sử dụng
     //free_list: Vec<usize>,
-    id_map: HashMap<OrderId, usize>,        // Ánh xạ OrderId sang vị trí trong Arena
+    id_map: HashMap<OrderID, usize>,        // Ánh xạ OrderID sang vị trí trong Arena
     buy_limits: BTreeMap<Price, Limit>,     //  Các mức giá (Limit) mua
     sell_limits: BTreeMap<Price, Limit>     //  Các mức giá (Limit) bán
 }
@@ -45,12 +51,12 @@ impl OrderBook {
     }
 
     /// Thêm lệnh mới - O(log M)
-    pub fn add_order(&mut self, id: OrderId, price: Price, shares: u32, is_buy: bool) {
+    pub fn add_order(&mut self, id: OrderID, price: Price, shares: U64, is_buy: bool) {
         let limits = if is_buy { &mut self.buy_limits } else { &mut self.sell_limits };
         
         let limit = limits.entry(price).or_insert(Limit {
             price,
-            total_volume: 0,
+            total_volume: U64::zero(),
             head: None,
             tail: None,
         });
@@ -74,11 +80,11 @@ impl OrderBook {
         }
 
         limit.tail = Some(new_idx);
-        limit.total_volume += shares as u64;
+        limit.total_volume += shares as U64;
     }
 
     /// Hủy lệnh bất kỳ - O(1) trung bình
-    pub fn cancel_order(&mut self, id: OrderId) {
+    pub fn cancel_order(&mut self, id: OrderID) {
         if let Some(&idx) = self.id_map.get(&id) {
             let price = self.orders_arena[idx].limit_parent;
             let shares = self.orders_arena[idx].shares;
@@ -94,20 +100,20 @@ impl OrderBook {
                 if let Some(n) = next_idx { self.orders_arena[n].prev = prev_idx; }
                 else { limit.tail = prev_idx; }
 
-                limit.total_volume -= shares as u64;
+                limit.total_volume -= shares as U64;
             }
             self.id_map.remove(&id);
         }
     }
 
-    pub fn execute_match(&mut self, taker_id: OrderId, price: Price, mut shares_left: u32, is_buy: bool) -> Vec<Trade> {
+    pub fn execute_match(&mut self, taker_id: OrderID, price: Price, mut shares_left: U64, is_buy: bool) -> Vec<Trade> {
         let mut trades = Vec::new();
 
         // Nếu là lệnh Buy, ta tìm trong sell_limits (giá thấp nhất trước)
         // Nếu là lệnh Sell, ta tìm trong buy_limits (giá cao nhất trước)
         let side_limits = if is_buy { &mut self.sell_limits } else { &mut self.buy_limits };
 
-        while shares_left > 0 {
+        while shares_left > U64::zero() {
             // Lấy mức giá tốt nhất hiện tại
             let best_price = if is_buy {
                 side_limits.keys().next().cloned() // Min price cho Sell side
@@ -120,7 +126,7 @@ impl OrderBook {
                     let limit = side_limits.get_mut(&p).unwrap();
                     
                     while let Some(maker_idx) = limit.head {
-                        let maker_order = self.orders_arena[maker_idx].as_mut().unwrap();
+                        let maker_order = &mut self.orders_arena[maker_idx];
                         let traded_shares = std::cmp::min(shares_left, maker_order.shares);
 
                         // Tạo Trade
@@ -134,9 +140,9 @@ impl OrderBook {
                         // Cập nhật khối lượng
                         maker_order.shares -= traded_shares;
                         shares_left -= traded_shares;
-                        limit.total_volume -= traded_shares as u64;
+                        limit.total_volume -= traded_shares as U64;
 
-                        if maker_order.shares == 0 {
+                        if maker_order.shares == U64::zero() {
                             // Lệnh maker đã khớp hết, xóa khỏi list
                             let next_maker = maker_order.next;
                             self.id_map.remove(&maker_order.id);
@@ -144,7 +150,7 @@ impl OrderBook {
                             
                             limit.head = next_maker;
                             if let Some(next_idx) = next_maker {
-                                self.orders_arena[next_idx].as_mut().unwrap().prev = None;
+                                self.orders_arena[next_idx].prev = None;
                             } else {
                                 limit.tail = None;
                             }
@@ -154,7 +160,7 @@ impl OrderBook {
                             //self.free_list.push(old_idx);
                         }
 
-                        if shares_left == 0 { break; }
+                        if shares_left == U64::zero() { break; }
                     }
 
                     // Nếu mức giá này không còn lệnh nào, xóa luôn Limit
@@ -167,107 +173,4 @@ impl OrderBook {
         }
         trades
     }
-}
-
-// 
-use crossbeam_channel::{unbounded, Sender, Receiver};
-use std::thread;
-
-// Định nghĩa các loại tin nhắn mà Core có thể xử lý
-enum OrderCommand {
-    Add { id: OrderId, price: Price, shares: u32, is_buy: bool , resp: Sender<Vec<Trade>>},
-    Cancel { id: OrderId },
-}
-
-fn start_core_engine() -> Sender<OrderCommand> {
-    let (tx, rx): (Sender<OrderCommand>, Receiver<OrderCommand>) = unbounded();
-
-    thread::spawn(move || {
-        let mut book = OrderBook::new();
-
-        // Vòng lặp vô tận xử lý tin nhắn với độ trễ thấp nhất
-        while let Ok(cmd) = rx.recv() {
-            match cmd {
-                OrderCommand::Add { id, price, mut shares, is_buy , resp} => {
-                    // 1. Chạy Matching Engine trước
-                    let trades = book.execute_match(id, price, shares, is_buy);
-
-                    // Tính khối lượng đã khớp để trừ đi
-                    let matched_shares: u32 = trades.iter().map(|t| t.shares).sum();
-                    shares -= matched_shares;
-
-                    // 2. Nếu còn dư thì mới thêm vào Book (Passive Order)
-                    if shares > 0 {
-                        book.add_order(id, price, shares, is_buy);
-                    }
-
-                    // 3. Gửi thông báo giao dịch về luồng gửi
-                    let _ = resp.send(trades);
-                }
-                OrderCommand::Cancel { id } => {
-                    book.cancel_order(id);
-                }
-            }
-            // Sau mỗi lệnh có thể thực hiện Match Engine tại đây
-        }
-    });
-    // Trả về Sender để các luồng khác gửi lệnh vào
-    tx
-}
-
-
-// Matching Engine
-#[derive(Debug)]
-pub struct Trade {
-    pub maker_id: OrderId,
-    pub taker_id: OrderId,
-    pub price: Price,
-    pub shares: u32,
-}
-
-
-// 
-
-use binance::websockets::*;
-use binance::api::*;
-use std::sync::atomic::AtomicBool;
-
-async fn run_binance_gateway(cmd_tx: Sender<OrderCommand>) {
-    let keep_running = AtomicBool::new(true);
-    let symbol = "BTCUSDT".to_string();
-
-    // 1. Khởi tạo WebSocket để nhận Diff. Depth Stream (Thay đổi sổ lệnh)
-    let mut web_socket = WebSockets::new(move |event: WebsocketEvent| {
-        if let WebsocketEvent::OrderBook(depth) = event {
-            // Biến đổi dữ liệu Binance thành lệnh cho Core của bạn
-            for ask in depth.asks {
-                let price = (ask.price * 100.0) as i32; // Chuyển sang fixed-point
-                let shares = (ask.qty * 1000.0) as u32;
-                
-                // Gửi lệnh vào Core để cập nhật sổ lệnh nội bộ
-                cmd_tx.send(OrderCommand::Add {
-                    id: 0, // Dữ liệu sàn không có ID lệnh cá nhân
-                    price,
-                    shares,
-                    is_buy: false,
-                    resp: crossbeam_channel::unbounded().0, // Bypass response cho market data
-                }).unwrap();
-            }
-        }
-        Ok(())
-    });
-
-    web_socket.connect(&format!("{}@depth", symbol.to_lowercase())).unwrap();
-    web_socket.event_loop(&keep_running).unwrap();
-}
-
-// execute
-// Trong luồng xử lý Trade
-let api_key = Some("YOUR_KEY".into());
-let secret_key = Some("YOUR_SECRET".into());
-let account: Account = Binance::new(api_key, secret_key);
-
-match account.limit_buy("BTCUSDT", 1.0, 60000.0) {
-    Ok(answer) => println!("Order placed: {:?}", answer),
-    Err(e) => println!("Error: {:?}", e),
 }

@@ -1,6 +1,5 @@
 mod types;
-mod market;
-mod strategy;
+mod execute;
 mod risk;
 mod trader;
 mod engine;
