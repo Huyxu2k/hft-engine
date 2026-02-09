@@ -1,8 +1,10 @@
 use binance::websockets::*;
-use binance::api::*;
+use crossbeam_channel::Sender;
 use std::sync::atomic::AtomicBool;
 
-async fn run_binance_gateway(cmd_tx: Sender<OrderCommand>) {
+use crate::types::{OrderCommand, U64};
+
+pub async fn run_binance_gateway(cmd_tx: Sender<OrderCommand>) {
     let keep_running = AtomicBool::new(true);
     let symbol = "BTCUSDT".to_string();
 
@@ -11,8 +13,8 @@ async fn run_binance_gateway(cmd_tx: Sender<OrderCommand>) {
         if let WebsocketEvent::OrderBook(depth) = event {
             // Biến đổi dữ liệu Binance thành lệnh cho Core của bạn
             for ask in depth.asks {
-                let price = (ask.price * 100.0) as i32; // Chuyển sang fixed-point
-                let shares = (ask.qty * 1000.0) as u32;
+                let price = U64::from_f64(ask.price); 
+                let shares = U64::from_f64(ask.qty);
                 
                 // Gửi lệnh vào Core để cập nhật sổ lệnh nội bộ
                 cmd_tx.send(OrderCommand::Add {
@@ -29,15 +31,4 @@ async fn run_binance_gateway(cmd_tx: Sender<OrderCommand>) {
 
     web_socket.connect(&format!("{}@depth", symbol.to_lowercase())).unwrap();
     web_socket.event_loop(&keep_running).unwrap();
-}
-
-// execute
-// Trong luồng xử lý Trade
-let api_key = Some("YOUR_KEY".into());
-let secret_key = Some("YOUR_SECRET".into());
-let account: Account = Binance::new(api_key, secret_key);
-
-match account.limit_buy("BTCUSDT", 1.0, 60000.0) {
-    Ok(answer) => println!("Order placed: {:?}", answer),
-    Err(e) => println!("Error: {:?}", e),
 }

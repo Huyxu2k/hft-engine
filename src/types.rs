@@ -1,3 +1,4 @@
+use std::iter::Sum;
 use std::ops::{Add, AddAssign, Div, Mul, Sub, SubAssign};
 use std::fmt;
 
@@ -27,10 +28,16 @@ pub struct Trade {
 
 // Định nghĩa các loại tin nhắn mà Core có thể xử lý
 pub enum OrderCommand {
-    Add { id: OrderID, price: Price, shares: u32, is_buy: bool , resp: Sender<Vec<Trade>>},
-    Cancel { id: Price },
+    Add { id: OrderID, price: Price, shares: U64, is_buy: bool , resp: Sender<Vec<Trade>>},
+    Cancel { id: OrderID },
 }
 
+// Tin nhắn gửi từ core ra ngoài
+pub enum EngineEvent {
+    Trades(Vec<Trade>),
+    OrderAccepted(OrderID),
+    OrderCancelled(OrderID)
+}
 
 // Fixed-Point
 pub const SCALE_FACTOR: u64 = 100_000_000;
@@ -101,6 +108,12 @@ impl Div for U64 {
     type Output = Self;
     fn div(self, rhs: Self) -> Self {
         Self(self.0 / rhs.0)
+    }
+}
+
+impl Sum for U64 {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(U64::zero(), |acc, x| acc + x)
     }
 }
 
