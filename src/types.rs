@@ -4,7 +4,6 @@ use std::fmt;
 
 use crossbeam_channel::Sender;
 
-use hashbrown::HashMap;
 
 // Const
 pub type OrderID = u64;
